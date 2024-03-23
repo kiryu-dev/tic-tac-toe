@@ -40,6 +40,15 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 				if err != nil {
 					return errors.WithMessage(err, "send message")
 				}
+			case domain.Disconnect:
+				err := player.SendMessage(domain.Message{
+					Type:    domain.Walkover,
+					Payload: domain.WalkoverPayload{GameResult: WalkoverGameResult},
+				})
+				if err != nil {
+					return errors.WithMessage(err, "send message to player")
+				}
+				return nil
 			default:
 				gameResult, err := toGameResult(v.Status, player)
 				if err != nil {
@@ -52,7 +61,11 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 				return nil
 			}
 			move, err := receiveMoveMessage(player, state.Board)
-			if err != nil {
+			switch {
+			case errors.Is(err, domain.ErrConnectionClosed):
+				player.MakeMove(domain.Move{Status: domain.Disconnect})
+				return nil
+			case err != nil:
 				return errors.WithMessage(err, "receive move message")
 			}
 			moveStatus, err := executeMove(move, state)
@@ -211,9 +224,10 @@ func isWinnable(board domain.Board, cellType domain.Cell) bool {
 }
 
 const (
-	WinGameResult  = "Победа"
-	LoseGameResult = "Поражение"
-	DrawGameResult = "Ничья"
+	WinGameResult      = "Победа"
+	LoseGameResult     = "Поражение"
+	DrawGameResult     = "Ничья"
+	WalkoverGameResult = "Техническая победа (оппонент отключился)"
 )
 
 func toGameResult(status domain.MoveStatus, player domain.Player) (string, error) {
@@ -229,6 +243,8 @@ func toGameResult(status domain.MoveStatus, player domain.Player) (string, error
 		return WinGameResult, nil
 	case domain.Draw:
 		return DrawGameResult, nil
+	case domain.Disconnect:
+		return WalkoverGameResult, nil
 	default:
 		return "", errUnexpectedMoveStatus
 	}
