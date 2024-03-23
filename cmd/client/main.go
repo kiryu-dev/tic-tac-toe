@@ -66,6 +66,13 @@ func (c *client) handleActions() error {
 			if isGameFinished {
 				return nil
 			}
+		case domain.Walkover:
+			v, err := utils.UnmarshalJson[domain.WalkoverPayload](msg.Payload)
+			if err != nil {
+				return errors.WithMessage(err, "unmarshal json to 'WalkoverPayload' type")
+			}
+			fmt.Println(v.GameResult)
+			return nil
 		}
 	}
 }
