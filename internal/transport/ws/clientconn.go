@@ -1,8 +1,6 @@
 package ws
 
 import (
-	"fmt"
-
 	"github.com/gorilla/websocket"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
 	"github.com/pkg/errors"
@@ -25,10 +23,13 @@ func (c client) WriteMessage(msg domain.Message) error {
 
 func (c client) ReadMessage() (domain.Message, error) {
 	var msg domain.Message
-	if err := c.conn.ReadJSON(&msg); err != nil {
+	err := c.conn.ReadJSON(&msg)
+	switch {
+	case websocket.IsUnexpectedCloseError(err):
+		return domain.Message{}, domain.ErrConnectionClosed
+	case err != nil:
 		return domain.Message{}, errors.WithMessage(err, "websocket conn read json")
 	}
-	fmt.Println(msg)
 	return msg, nil
 }
 
