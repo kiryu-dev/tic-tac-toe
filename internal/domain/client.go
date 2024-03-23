@@ -15,6 +15,7 @@ const (
 	StartGame = messageType(iota)
 	RequestMove
 	PlayerMove
+	Walkover
 )
 
 type Message struct {
@@ -32,6 +33,10 @@ type PlayerMovePayload struct {
 	Position        byte
 	IsMoveRequested bool
 	GameResult      *string
+}
+
+type WalkoverPayload struct {
+	GameResult string
 }
 
 type PlayerMovePayloadOption func(p *PlayerMovePayload)

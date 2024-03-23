@@ -21,6 +21,7 @@ const (
 	Draw
 	WinX
 	WinO
+	Disconnect
 )
 
 type Move struct {
