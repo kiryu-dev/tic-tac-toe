@@ -1,0 +1,7 @@
+outer_servers:
+  - host: stateful-server-1
+    port: 8000
+  - host: stateful-server-2
+    port: 8001
+  - host: stateful-server-3
+    port: 8002
