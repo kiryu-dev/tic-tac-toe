@@ -31,17 +31,18 @@ type useCase struct {
 	logger      *zap.Logger
 }
 
-func New(game domain.GameUseCase, statesChan chan map[string]*domain.GameState, logger *zap.Logger) useCase {
+func New(game domain.GameUseCase, logger *zap.Logger) useCase {
 	u := useCase{
 		game:        game,
 		clientQueue: make(chan enqueuedClient, clientQueueBufSize),
 		gamesStates: make(map[string]*domain.GameState),
-		statesChan:  statesChan,
+		statesChan:  make(chan map[string]*domain.GameState),
 		ticker:      time.NewTicker(syncPeriod),
 		mu:          &sync.RWMutex{},
 		logger:      logger,
 	}
 	go u.createGames()
+	go u.syncStates()
 	return u
 }
 
@@ -69,24 +70,20 @@ func (u useCase) enqueueForGame(client domain.Client) domain.Player {
 func (u useCase) createGames() {
 	for {
 		for len(u.clientQueue) > 1 {
-			gameUuid, playerX, playerO := u.createGame()
 			lhs := <-u.clientQueue
 			rhs := <-u.clientQueue
+			gameUuid := u.createGame(lhs.client.Uuid(), rhs.client.Uuid())
 			moveChan := make(chan domain.Move)
-			lhs.resultChan <- domain.NewPlayer(playerX, gameUuid, lhs.client, domain.X, moveChan)
-			rhs.resultChan <- domain.NewPlayer(playerO, gameUuid, rhs.client, domain.O, moveChan)
+			lhs.resultChan <- domain.NewPlayer(gameUuid, lhs.client, domain.X, moveChan)
+			rhs.resultChan <- domain.NewPlayer(gameUuid, rhs.client, domain.O, moveChan)
 		}
 	}
 }
 
-func (u useCase) createGame() (string, string, string) {
+func (u useCase) createGame(playerX string, playerO string) string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	var (
-		gameUuid = uuid.NewString()
-		playerX  = uuid.NewString()
-		playerO  = uuid.NewString()
-	)
+	gameUuid := uuid.NewString()
 	var board domain.Board
 	for i := range board {
 		board[i] = domain.None
@@ -98,12 +95,34 @@ func (u useCase) createGame() (string, string, string) {
 		CurrentMove: domain.X,
 		Status:      domain.ReadyToStart,
 	}
-	return gameUuid, playerX, playerO
+	return gameUuid
 }
 
 func (u useCase) syncStates() {
 	defer u.ticker.Stop()
 	for range u.ticker.C {
+		u.removeFinishedGames()
 		u.statesChan <- u.gamesStates
 	}
+}
+
+func (u useCase) GamesStates() <-chan map[string]*domain.GameState {
+	return u.statesChan
+}
+
+func (u useCase) removeFinishedGames() {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	for gameUuid, state := range u.gamesStates {
+		if state.Status == domain.Finished {
+			delete(u.gamesStates, gameUuid)
+		}
+	}
+}
+
+func (u useCase) ApplyStates(_ context.Context, states map[string]*domain.GameState) {
+	u.mu.Lock()
+	u.gamesStates = states
+	u.logger.Info("applied states", zap.Any("states", u.gamesStates))
+	u.mu.Unlock()
 }

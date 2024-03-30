@@ -8,10 +8,14 @@ import (
 
 type client struct {
 	conn *websocket.Conn
+	uuid string
 }
 
-func newClient(conn *websocket.Conn) client {
-	return client{conn: conn}
+func newClient(conn *websocket.Conn, uuid string) client {
+	return client{
+		conn: conn,
+		uuid: uuid,
+	}
 }
 
 func (c client) WriteMessage(msg domain.Message) error {
@@ -31,6 +35,10 @@ func (c client) ReadMessage() (domain.Message, error) {
 		return domain.Message{}, errors.WithMessage(err, "websocket conn read json")
 	}
 	return msg, nil
+}
+
+func (c client) Uuid() string {
+	return c.uuid
 }
 
 func (c client) Close() {

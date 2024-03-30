@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/kiryu-dev/tic-tac-toe/internal/config"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
@@ -17,7 +18,10 @@ import (
 	"github.com/pkg/errors"
 )
 
-var portByHost = make(map[string]string)
+var (
+	clientUuid = uuid.NewString()
+	portByHost = make(map[string]string)
+)
 
 func main() {
 	cfgPath := flag.String("config", "./conf/config.yml", "path to config")
@@ -45,7 +49,9 @@ func сonnectToServer(port string) error {
 		serverAddress := net.JoinHostPort("localhost", port)
 		u := url.URL{Scheme: "ws", Host: serverAddress, Path: "/game"}
 		log.Printf("try to connect to server '%s'...\n", serverAddress)
-		conn, _, err := websocket.DefaultDialer.Dial(u.String(), map[string][]string{})
+		conn, _, err := websocket.DefaultDialer.Dial(u.String(), map[string][]string{
+			domain.ClientUuidHeader: {clientUuid},
+		})
 		if err != nil {
 			return errors.WithMessage(err, "websocket dial")
 		}

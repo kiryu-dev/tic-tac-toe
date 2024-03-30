@@ -9,6 +9,10 @@ var (
 	ErrEmptyMessage     = errors.New("empty message")
 )
 
+const (
+	ClientUuidHeader = "X-Client-Key"
+)
+
 type messageType byte
 
 const (
@@ -67,4 +71,5 @@ func WithCellType(cellType Cell) PlayerMovePayloadOption {
 type Client interface {
 	WriteMessage(msg Message) error
 	ReadMessage() (Message, error)
+	Uuid() string
 }

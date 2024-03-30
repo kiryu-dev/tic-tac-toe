@@ -8,9 +8,9 @@ type Player struct {
 	ch        chan Move
 }
 
-func NewPlayer(uuid string, gameUuid string, cli Client, cellType Cell, ch chan Move) Player {
+func NewPlayer(gameUuid string, cli Client, cellType Cell, ch chan Move) Player {
 	return Player{
-		uuid:      uuid,
+		uuid:      cli.Uuid(),
 		gameUuid:  gameUuid,
 		playerCli: cli,
 		cell:      cellType,

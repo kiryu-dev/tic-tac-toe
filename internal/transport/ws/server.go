@@ -42,8 +42,8 @@ func (s *server) ListenAndServe(ctx context.Context) {
 			s.logger.Info(err.Error())
 		}
 	}()
-	go s.sync.Sync(ctx)
-	go s.sync.DefineServerRole(ctx, "")
+	go s.sync.Sync(ctx, s.hub.GamesStates())
+	go s.sync.DefineMasterServer(ctx)
 	for {
 		select {
 		case info := <-s.sync.Chan():
@@ -53,11 +53,6 @@ func (s *server) ListenAndServe(ctx context.Context) {
 			if err := s.sync.CheckMasterHealth(ctx); err != nil {
 				s.logger.Error(err.Error())
 			}
-			//if info.ServerRole == domain.ReserveServer {
-			//	if err := s.sync.CheckMasterHealth(ctx, srvChan); err != nil {
-			//		s.logger.Error(err.Error())
-			//	}
-			//}
 		}
 	}
 }
@@ -69,7 +64,6 @@ func (s *server) Shutdown() error {
 func (s *server) initRoutes() {
 	http.HandleFunc("/game", s.serveWs)
 	http.HandleFunc("POST /define_master", s.defineMaster)
-	http.HandleFunc("GET /health", func(_ http.ResponseWriter, _ *http.Request) {
-		s.logger.Info("health checking...")
-	})
+	http.HandleFunc("GET /health", s.healthCheck)
+	http.HandleFunc("POST /sync", s.applyStates)
 }

@@ -25,11 +25,14 @@ type DefineMasterResponse struct {
 	MasterServerName string
 }
 
+type HealthCheckResponse struct {
+	MasterServer string
+	Role         ServerRole
+}
+
 type SyncUseCase interface {
-	Sync(ctx context.Context)
-	Addresses() map[string]string
-	DefineMasterServer(ctx context.Context, req *DefineMasterRequest) (DefineMasterResponse, error)
-	DefineServerRole(ctx context.Context, masterToIgnore string)
+	Sync(ctx context.Context, statesChan <-chan map[string]*GameState)
+	DefineMasterServer(ctx context.Context)
 	CheckMasterHealth(ctx context.Context) error
 	Chan() <-chan ServerInfo
 }
@@ -37,5 +40,5 @@ type SyncUseCase interface {
 type SyncRepository interface {
 	Sync(ctx context.Context, addr string, states map[string]*GameState) error
 	DefineMaster(ctx context.Context, req DefineMasterRequest, addr string) (*DefineMasterResponse, error)
-	HealthCheck(ctx context.Context, addr string) error
+	HealthCheck(ctx context.Context, addr string) (*HealthCheckResponse, error)
 }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/kiryu-dev/tic-tac-toe/internal/adapters/webapi"
 	"github.com/kiryu-dev/tic-tac-toe/internal/config"
-	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
 	"github.com/kiryu-dev/tic-tac-toe/internal/transport/ws"
 	"github.com/kiryu-dev/tic-tac-toe/internal/usecase/game"
 	"github.com/kiryu-dev/tic-tac-toe/internal/usecase/hub"
@@ -33,7 +32,7 @@ func main() {
 	if err != nil {
 		logger.Fatal(err.Error())
 	}
-	sigChan := make(chan os.Signal, 2)
+	sigChan := make(chan os.Signal)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	errGroup := new(errgroup.Group)
 	errGroup.Go(func() error {
@@ -42,13 +41,11 @@ func main() {
 			return errors.Errorf("captured signal: %v", s)
 		}
 	})
-	statesChan := make(chan map[string]*domain.GameState)
-	defer close(statesChan)
 	var (
 		repo   = webapi.New()
-		sync   = synchronizer.New(repo, statesChan, cfg.Servers, logger)
+		sync   = synchronizer.New(repo, cfg.Servers, logger)
 		game   = game.New(logger)
-		hub    = hub.New(game, statesChan, logger)
+		hub    = hub.New(game, logger)
 		server = ws.New(hub, sync, logger)
 	)
 	go server.ListenAndServe(context.Background())

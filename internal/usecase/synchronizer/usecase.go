@@ -14,22 +14,20 @@ import (
 
 type useCase struct {
 	repo       domain.SyncRepository
-	ch         chan map[string]*domain.GameState
 	addrs      map[string]string
 	masterName *atomic.String
 	serverName string
-	//mu         *sync.RWMutex
-	logger  *zap.Logger
-	ticker  *time.Ticker
-	srvChan chan domain.ServerInfo
+	logger     *zap.Logger
+	ticker     *time.Ticker
+	srvChan    chan domain.ServerInfo
 }
 
 const (
 	httpPrefix        = "http://"
-	healthCheckPeriod = 5 * time.Second
+	healthCheckPeriod = 2 * time.Second
 )
 
-func New(repo domain.SyncRepository, statesChan chan map[string]*domain.GameState, cfg []config.ServerConfig,
+func New(repo domain.SyncRepository, cfg []config.ServerConfig,
 	logger *zap.Logger) *useCase {
 	addrs := make(map[string]string)
 	serverName := os.Getenv("SERVER_NAME")
@@ -42,26 +40,26 @@ func New(repo domain.SyncRepository, statesChan chan map[string]*domain.GameStat
 		}
 	}
 	logger.Info("defined servers", zap.Any("servers", addrs))
-	logger.Info("define master server", zap.String("host", serverName))
 	return &useCase{
 		repo:       repo,
-		ch:         statesChan,
 		addrs:      addrs,
 		serverName: serverName,
-		masterName: atomic.NewString(serverName),
-		//mu:         &sync.RWMutex{},
-		logger:  logger,
-		ticker:  time.NewTicker(healthCheckPeriod),
-		srvChan: make(chan domain.ServerInfo),
+		masterName: atomic.NewString(""),
+		logger:     logger,
+		ticker:     time.NewTicker(healthCheckPeriod),
+		srvChan:    make(chan domain.ServerInfo),
 	}
 }
 
-func (u *useCase) Sync(ctx context.Context) {
+func (u *useCase) Sync(ctx context.Context, statesChan <-chan map[string]*domain.GameState) {
 	for {
 		select {
-		case v := <-u.ch:
+		case v := <-statesChan:
+			if u.serverName != u.masterName.Load() {
+				continue
+			}
 			u.logger.Info("starting sync games states...")
-			for addr := range u.addrs {
+			for _, addr := range u.addrs {
 				err := u.repo.Sync(ctx, addr, v)
 				if err != nil {
 					u.logger.Warn(err.Error())
@@ -71,55 +69,32 @@ func (u *useCase) Sync(ctx context.Context) {
 	}
 }
 
-func (u *useCase) DefineMasterServer(_ context.Context, req *domain.DefineMasterRequest) (domain.DefineMasterResponse, error) {
-	u.logger.Info("define master server", zap.Any("req", req))
-	if req.MasterToIgnore != "" && req.MasterToIgnore == u.masterName.Load() {
-		u.masterName.Store(u.serverName)
-	}
-
-	if req.InitiatorMasterServerName == u.masterName.Load() {
-		return domain.DefineMasterResponse{
-			MasterServerName: u.masterName.Load(),
-		}, nil
-	}
-
-	if _, ok := u.addrs[req.InitiatorMasterServerName]; !ok {
-		u.logger.Warn("undefined server", zap.String("host", req.InitiatorMasterServerName))
-		return domain.DefineMasterResponse{}, errors.New("undefined server")
-	}
-
-	u.compareWithCurrentMaster(req.InitiatorMasterServerName)
-
-	return domain.DefineMasterResponse{
-		MasterServerName: u.masterName.Load(),
-	}, nil
-}
-
-func (u *useCase) DefineServerRole(ctx context.Context, masterToIgnore string) {
+func (u *useCase) DefineMasterServer(ctx context.Context) {
+	master := u.serverName
 	for host, addr := range u.addrs {
-		if host == masterToIgnore {
-			continue
-		}
-		resp, err := u.repo.DefineMaster(ctx, domain.DefineMasterRequest{
-			InitiatorMasterServerName: u.masterName.Load(),
-			MasterToIgnore:            masterToIgnore,
-		}, addr)
+		res, err := u.repo.HealthCheck(ctx, addr)
 		if err != nil {
 			u.logger.Warn(err.Error())
 			continue
 		}
-		u.compareWithCurrentMaster(resp.MasterServerName)
+		if res.Role == domain.MasterServer {
+			master = host
+			break
+		}
+		master = u.compareMasters(master, host)
 	}
 
+	/* TODO: maybe announce masters? */
+
 	serverRole := domain.ReserveServer
-	masterName := u.masterName.Load()
-	if masterName == u.serverName {
+	u.masterName.Store(master)
+	if master == u.serverName {
 		serverRole = domain.MasterServer
 	}
 
 	u.srvChan <- domain.ServerInfo{
 		ServerRole:       serverRole,
-		MasterServerName: masterName,
+		MasterServerName: master,
 	}
 }
 
@@ -136,29 +111,23 @@ func (u *useCase) CheckMasterHealth(ctx context.Context) error {
 			return errors.Errorf("undefined master server '%s'", u.masterName)
 		}
 
-		err := u.repo.HealthCheck(ctx, masterAddr)
+		_, err := u.repo.HealthCheck(ctx, masterAddr)
 		if err != nil {
 			u.logger.Warn(err.Error())
-			if u.masterName.Load() == masterName {
-				u.masterName.Store(u.serverName)
-			}
-			go u.DefineServerRole(ctx, masterName)
+			u.masterName.Store(u.serverName)
+			go u.DefineMasterServer(ctx)
 			break
 		}
 	}
 	return nil
 }
 
-func (u *useCase) compareWithCurrentMaster(newMasterServerName string) {
-	masterName := u.masterName.Load()
-	if masterName == "" || masterName > newMasterServerName {
-		u.masterName.Store(newMasterServerName)
-		u.logger.Info("new master server", zap.String("host", u.masterName.Load()))
+func (u *useCase) compareMasters(lhs string, rhs string) string {
+	u.logger.Info("compare masters", zap.String("lhs", lhs), zap.String("rhs", rhs))
+	if lhs > rhs {
+		return rhs
 	}
-}
-
-func (u *useCase) Addresses() map[string]string {
-	return u.addrs
+	return lhs
 }
 
 func (u *useCase) Chan() <-chan domain.ServerInfo {

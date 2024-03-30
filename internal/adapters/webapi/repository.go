@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	clientTimeout        = time.Second
+	clientTimeout        = 5 * time.Second
 	syncStatesEndpoint   = "/sync"
 	defineMasterEndpoint = "/define_master"
 	healthCheckEndpoint  = "/health"
@@ -72,17 +72,22 @@ func (r repository) DefineMaster(ctx context.Context, req domain.DefineMasterReq
 	return result, nil
 }
 
-func (r repository) HealthCheck(ctx context.Context, addr string) error {
+func (r repository) HealthCheck(ctx context.Context, addr string) (*domain.HealthCheckResponse, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, addr+healthCheckEndpoint, nil)
 	if err != nil {
-		return errors.WithMessage(err, "new get request")
+		return nil, errors.WithMessage(err, "new get request")
 	}
 	resp, err := r.cli.Do(request)
 	if err != nil {
-		return errors.WithMessagef(err, "call http endpoint '%s'", healthCheckEndpoint)
+		return nil, errors.WithMessagef(err, "call http endpoint '%s'", healthCheckEndpoint)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return errors.Errorf("unexpected response status '%s'", resp.Status)
+		return nil, errors.Errorf("unexpected response status '%s'", resp.Status)
 	}
-	return nil
+	result := new(domain.HealthCheckResponse)
+	if err := jsoniter.NewDecoder(resp.Body).Decode(result); err != nil {
+		return nil, errors.WithMessage(err, "decode json response body")
+	}
+	_ = resp.Body.Close()
+	return result, nil
 }

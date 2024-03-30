@@ -1,7 +1,9 @@
 package ws
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
@@ -15,7 +17,12 @@ func (s *server) serveWs(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error(err.Error())
 		return
 	}
-	client := newClient(conn)
+	clientUuid := strings.TrimSpace(r.Header.Get(domain.ClientUuidHeader))
+	if clientUuid == "" {
+		s.logger.Warn(fmt.Sprintf("empty '%s' header", domain.ClientUuidHeader))
+		return
+	}
+	client := newClient(conn, clientUuid)
 	defer client.Close()
 	switch s.role {
 	case domain.ReserveServer:
@@ -36,21 +43,44 @@ func (s *server) serveWs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) defineMaster(w http.ResponseWriter, r *http.Request) {
-	req := new(domain.DefineMasterRequest)
-	if err := jsoniter.NewDecoder(r.Body).Decode(req); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.logger.Warn(err.Error())
-		return
-	}
-	resp, err := s.sync.DefineMasterServer(r.Context(), req)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		s.logger.Warn(err.Error())
-		return
+func (s *server) defineMaster(_ http.ResponseWriter, _ *http.Request) {
+	//req := new(domain.DefineMasterRequest)
+	//if err := jsoniter.NewDecoder(r.Body).Decode(req); err != nil {
+	//	w.WriteHeader(http.StatusBadRequest)
+	//	s.logger.Warn(err.Error())
+	//	return
+	//}
+	//resp, err := s.sync.DefineMasterServer(r.Context())
+	//if err != nil {
+	//	w.WriteHeader(http.StatusNotFound)
+	//	s.logger.Warn(err.Error())
+	//	return
+	//}
+	//if err := jsoniter.NewEncoder(w).Encode(resp); err != nil {
+	//	w.WriteHeader(http.StatusInternalServerError)
+	//	s.logger.Warn(err.Error())
+	//}
+}
+
+func (s *server) healthCheck(w http.ResponseWriter, _ *http.Request) {
+	s.logger.Info("health checking...")
+	resp := domain.HealthCheckResponse{
+		MasterServer: s.masterHost,
+		Role:         s.role,
 	}
 	if err := jsoniter.NewEncoder(w).Encode(resp); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		s.logger.Warn(err.Error())
 	}
+}
+
+func (s *server) applyStates(w http.ResponseWriter, r *http.Request) {
+	s.logger.Info("sync states")
+	req := make(map[string]*domain.GameState)
+	if err := jsoniter.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		s.logger.Warn(err.Error())
+		return
+	}
+	s.hub.ApplyStates(r.Context(), req)
 }
