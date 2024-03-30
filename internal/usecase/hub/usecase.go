@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
@@ -12,6 +13,7 @@ import (
 
 const (
 	clientQueueBufSize = 2
+	syncPeriod         = 5 * time.Second
 )
 
 type enqueuedClient struct {
@@ -23,15 +25,19 @@ type useCase struct {
 	game        domain.GameUseCase
 	clientQueue chan enqueuedClient
 	gamesStates map[string]*domain.GameState
+	statesChan  chan map[string]*domain.GameState
+	ticker      *time.Ticker
 	mu          *sync.RWMutex
 	logger      *zap.Logger
 }
 
-func New(game domain.GameUseCase, logger *zap.Logger) useCase {
+func New(game domain.GameUseCase, statesChan chan map[string]*domain.GameState, logger *zap.Logger) useCase {
 	u := useCase{
 		game:        game,
 		clientQueue: make(chan enqueuedClient, clientQueueBufSize),
 		gamesStates: make(map[string]*domain.GameState),
+		statesChan:  statesChan,
+		ticker:      time.NewTicker(syncPeriod),
 		mu:          &sync.RWMutex{},
 		logger:      logger,
 	}
@@ -93,4 +99,11 @@ func (u useCase) createGame() (string, string, string) {
 		Status:      domain.ReadyToStart,
 	}
 	return gameUuid, playerX, playerO
+}
+
+func (u useCase) syncStates() {
+	defer u.ticker.Stop()
+	for range u.ticker.C {
+		u.statesChan <- u.gamesStates
+	}
 }

@@ -72,7 +72,7 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 			if err != nil {
 				return errors.WithMessage(err, "execute player's move")
 			}
-			printBoard(state.Board)
+			//printBoard(state.Board)
 			player.MakeMove(domain.Move{
 				CellType: player.Cell(),
 				Position: move.Position,

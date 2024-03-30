@@ -16,6 +16,7 @@ const (
 	RequestMove
 	PlayerMove
 	Walkover
+	SwitchServer
 )
 
 type Message struct {
@@ -37,6 +38,10 @@ type PlayerMovePayload struct {
 
 type WalkoverPayload struct {
 	GameResult string
+}
+
+type SwitchServerPayload struct {
+	MasterServer string
 }
 
 type PlayerMovePayloadOption func(p *PlayerMovePayload)

@@ -2,38 +2,78 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
 
 	"github.com/gorilla/websocket"
+	"github.com/kiryu-dev/tic-tac-toe/internal/config"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
 	"github.com/kiryu-dev/tic-tac-toe/pkg/utils"
 	"github.com/pkg/errors"
 )
 
+var portByHost = make(map[string]string)
+
 func main() {
-	u := url.URL{Scheme: "ws", Host: "localhost:8080", Path: "/"}
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), map[string][]string{})
+	cfgPath := flag.String("config", "./conf/config.yml", "path to config")
+	flag.Parse()
+	cfg, err := config.New(*cfgPath)
 	if err != nil {
-		log.Fatal("dial: " + err.Error())
-	}
-	defer func() {
-		_ = conn.Close()
-	}()
-	client := newClient(conn)
-	if err := client.handleActions(); err != nil {
 		log.Fatal(err)
+	}
+	for _, serverCfg := range cfg.Servers {
+		portByHost[serverCfg.Host] = strconv.Itoa(serverCfg.Port)
+	}
+	for {
+		for host, port := range portByHost {
+			err := сonnectToServer(port)
+			if err == nil {
+				return
+			}
+			log.Printf("Не удалось подключиться к серверу '%s': %v", host, err)
+		}
+	}
+}
+
+func сonnectToServer(port string) error {
+	for {
+		serverAddress := net.JoinHostPort("localhost", port)
+		u := url.URL{Scheme: "ws", Host: serverAddress, Path: "/game"}
+		log.Printf("try to connect to server '%s'...\n", serverAddress)
+		conn, _, err := websocket.DefaultDialer.Dial(u.String(), map[string][]string{})
+		if err != nil {
+			return errors.WithMessage(err, "websocket dial")
+		}
+		client := newClient(conn)
+		result, err := client.handleActions()
+		if err != nil {
+			_ = conn.Close()
+			return errors.WithMessage(err, "handle actions")
+		}
+		_ = conn.Close()
+		if !result.shouldSwitchToNewMaster {
+			return nil
+		}
+		var ok bool
+		port, ok = portByHost[result.newMasterServer]
+		if !ok {
+			return errors.New("undefined master server")
+		}
+		log.Printf("переключаемся на сервер '%s'\n", result.newMasterServer)
 	}
 }
 
 type client struct {
-	conn     *websocket.Conn
-	scanner  *bufio.Scanner
-	board    domain.Board
-	cellType domain.Cell
+	conn         *websocket.Conn
+	scanner      *bufio.Scanner
+	board        domain.Board
+	cellType     domain.Cell
+	masterServer string
 }
 
 func newClient(conn *websocket.Conn) *client {
@@ -43,36 +83,50 @@ func newClient(conn *websocket.Conn) *client {
 	}
 }
 
-func (c *client) handleActions() error {
+type handleActionsResult struct {
+	shouldSwitchToNewMaster bool
+	newMasterServer         string
+}
+
+func (c *client) handleActions() (handleActionsResult, error) {
 	for {
 		msg := new(domain.Message)
 		if err := c.conn.ReadJSON(msg); err != nil {
-			return errors.WithMessage(err, "read json msg")
+			return handleActionsResult{}, errors.WithMessage(err, "read json msg")
 		}
 		switch msg.Type {
 		case domain.StartGame:
 			if err := c.handleStartGameAction(msg); err != nil {
-				return errors.WithMessage(err, "handle start game action")
+				return handleActionsResult{}, errors.WithMessage(err, "handle start game action")
 			}
 		case domain.RequestMove:
 			if err := c.handleRequestMoveAction(); err != nil {
-				return errors.WithMessage(err, "handle request move action")
+				return handleActionsResult{}, errors.WithMessage(err, "handle request move action")
 			}
 		case domain.PlayerMove:
 			isGameFinished, err := c.handlePlayerMoveAction(msg)
 			if err != nil {
-				return errors.WithMessage(err, "handle player move action")
+				return handleActionsResult{}, errors.WithMessage(err, "handle player move action")
 			}
 			if isGameFinished {
-				return nil
+				return handleActionsResult{}, nil
 			}
 		case domain.Walkover:
 			v, err := utils.UnmarshalJson[domain.WalkoverPayload](msg.Payload)
 			if err != nil {
-				return errors.WithMessage(err, "unmarshal json to 'WalkoverPayload' type")
+				return handleActionsResult{}, errors.WithMessage(err, "unmarshal json to 'WalkoverPayload' type")
 			}
 			fmt.Println(v.GameResult)
-			return nil
+			return handleActionsResult{}, nil
+		case domain.SwitchServer:
+			v, err := utils.UnmarshalJson[domain.SwitchServerPayload](msg.Payload)
+			if err != nil {
+				return handleActionsResult{}, errors.WithMessage(err, "unmarshal json to 'SwitchServerPayload' type")
+			}
+			return handleActionsResult{
+				shouldSwitchToNewMaster: true,
+				newMasterServer:         v.MasterServer,
+			}, nil
 		}
 	}
 }
