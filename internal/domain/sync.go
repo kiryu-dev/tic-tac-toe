@@ -39,6 +39,5 @@ type SyncUseCase interface {
 
 type SyncRepository interface {
 	Sync(ctx context.Context, addr string, states map[string]*GameState) error
-	DefineMaster(ctx context.Context, req DefineMasterRequest, addr string) (*DefineMasterResponse, error)
 	HealthCheck(ctx context.Context, addr string) (*HealthCheckResponse, error)
 }

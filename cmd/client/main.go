@@ -62,11 +62,10 @@ func сonnectToServer(port string, ticker *time.Ticker) error {
 		}
 		client := newClient(conn)
 		result, err := client.handleActions()
+		_ = conn.Close()
 		if err != nil {
-			_ = conn.Close()
 			return errors.WithMessage(err, "handle actions")
 		}
-		_ = conn.Close()
 		if !result.shouldSwitchToNewMaster {
 			return nil
 		}
@@ -81,11 +80,10 @@ func сonnectToServer(port string, ticker *time.Ticker) error {
 }
 
 type client struct {
-	conn         *websocket.Conn
-	scanner      *bufio.Scanner
-	board        domain.Board
-	cellType     domain.Cell
-	masterServer string
+	conn     *websocket.Conn
+	scanner  *bufio.Scanner
+	board    domain.Board
+	cellType domain.Cell
 }
 
 func newClient(conn *websocket.Conn) *client {

@@ -84,8 +84,6 @@ func (u *useCase) DefineMasterServer(ctx context.Context) {
 		master = u.compareMasters(master, host)
 	}
 
-	/* TODO: maybe announce masters? */
-
 	serverRole := domain.ReserveServer
 	u.masterName.Store(master)
 	if master == u.serverName {

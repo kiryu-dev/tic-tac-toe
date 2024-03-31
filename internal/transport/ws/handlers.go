@@ -43,25 +43,6 @@ func (s *server) serveWs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *server) defineMaster(_ http.ResponseWriter, _ *http.Request) {
-	//req := new(domain.DefineMasterRequest)
-	//if err := jsoniter.NewDecoder(r.Body).Decode(req); err != nil {
-	//	w.WriteHeader(http.StatusBadRequest)
-	//	s.logger.Warn(err.Error())
-	//	return
-	//}
-	//resp, err := s.sync.DefineMasterServer(r.Context())
-	//if err != nil {
-	//	w.WriteHeader(http.StatusNotFound)
-	//	s.logger.Warn(err.Error())
-	//	return
-	//}
-	//if err := jsoniter.NewEncoder(w).Encode(resp); err != nil {
-	//	w.WriteHeader(http.StatusInternalServerError)
-	//	s.logger.Warn(err.Error())
-	//}
-}
-
 func (s *server) healthCheck(w http.ResponseWriter, _ *http.Request) {
 	s.logger.Info("health checking...")
 	resp := domain.HealthCheckResponse{

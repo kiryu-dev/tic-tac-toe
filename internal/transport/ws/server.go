@@ -70,7 +70,6 @@ func (s *server) Shutdown() error {
 
 func (s *server) initRoutes() {
 	http.HandleFunc("/game", s.serveWs)
-	http.HandleFunc("POST /define_master", s.defineMaster)
 	http.HandleFunc("GET /health", s.healthCheck)
 	http.HandleFunc("POST /sync", s.applyStates)
 }
