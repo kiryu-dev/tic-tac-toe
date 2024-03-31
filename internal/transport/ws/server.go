@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
@@ -18,6 +19,7 @@ type server struct {
 	masterHost string
 	upgrader   websocket.Upgrader
 	logger     *zap.Logger
+	done       chan struct{}
 }
 
 func New(hub domain.HubUseCase, sync domain.SyncUseCase, logger *zap.Logger) *server {
@@ -31,6 +33,7 @@ func New(hub domain.HubUseCase, sync domain.SyncUseCase, logger *zap.Logger) *se
 			},
 		},
 		logger: logger,
+		done:   make(chan struct{}),
 	}
 }
 
@@ -42,6 +45,7 @@ func (s *server) ListenAndServe(ctx context.Context) {
 			s.logger.Info(err.Error())
 		}
 	}()
+	time.Sleep(3 * time.Second)
 	go s.sync.Sync(ctx, s.hub.GamesStates())
 	go s.sync.DefineMasterServer(ctx)
 	for {
@@ -53,11 +57,14 @@ func (s *server) ListenAndServe(ctx context.Context) {
 			if err := s.sync.CheckMasterHealth(ctx); err != nil {
 				s.logger.Error(err.Error())
 			}
+		case <-s.done:
+			return
 		}
 	}
 }
 
 func (s *server) Shutdown() error {
+	s.done <- struct{}{}
 	return s.srv.Shutdown(context.Background())
 }
 

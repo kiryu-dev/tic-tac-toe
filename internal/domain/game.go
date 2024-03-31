@@ -41,12 +41,14 @@ const (
 )
 
 type GameState struct {
-	Board       Board
-	PlayerX     string
-	PlayerO     string
-	CurrentMove Cell
-	Status      status
-	Round       uint8
+	Board           Board
+	PlayerX         string
+	PlayerO         string
+	RecoveredPlayer string `json:"-"` /* TODO: `RecoveredPlayer` такой себе нейминг.. другой бы.. */
+	CurrentMove     Cell
+	Status          status
+	Round           uint8
+	MoveChan        chan Move `json:"-"`
 }
 
 type GameUseCase interface {

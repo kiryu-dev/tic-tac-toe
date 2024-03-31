@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -17,6 +18,8 @@ import (
 	"github.com/kiryu-dev/tic-tac-toe/pkg/utils"
 	"github.com/pkg/errors"
 )
+
+const connectTryPeriod = 5 * time.Second
 
 var (
 	clientUuid = uuid.NewString()
@@ -33,9 +36,11 @@ func main() {
 	for _, serverCfg := range cfg.Servers {
 		portByHost[serverCfg.Host] = strconv.Itoa(serverCfg.Port)
 	}
+	ticker := time.NewTicker(connectTryPeriod)
+	defer ticker.Stop()
 	for {
 		for host, port := range portByHost {
-			err := сonnectToServer(port)
+			err := сonnectToServer(port, ticker)
 			if err == nil {
 				return
 			}
@@ -44,8 +49,8 @@ func main() {
 	}
 }
 
-func сonnectToServer(port string) error {
-	for {
+func сonnectToServer(port string, ticker *time.Ticker) error {
+	for range ticker.C {
 		serverAddress := net.JoinHostPort("localhost", port)
 		u := url.URL{Scheme: "ws", Host: serverAddress, Path: "/game"}
 		log.Printf("try to connect to server '%s'...\n", serverAddress)
@@ -72,6 +77,7 @@ func сonnectToServer(port string) error {
 		}
 		log.Printf("переключаемся на сервер '%s'\n", result.newMasterServer)
 	}
+	return nil
 }
 
 type client struct {

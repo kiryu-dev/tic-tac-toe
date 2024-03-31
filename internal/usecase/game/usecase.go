@@ -3,6 +3,7 @@ package game
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
 	"github.com/kiryu-dev/tic-tac-toe/pkg/utils"
@@ -11,25 +12,46 @@ import (
 )
 
 type useCase struct {
+	mu     *sync.Mutex
 	logger *zap.Logger
 }
 
 func New(logger *zap.Logger) useCase {
 	return useCase{
+		mu:     &sync.Mutex{},
 		logger: logger,
 	}
 }
 
 func (u useCase) Play(_ context.Context, player domain.Player, state *domain.GameState) error {
+	u.mu.Lock()
+	u.logger.Info("start playing", zap.String("player uuid", player.Uuid()))
+	state.Status = domain.InProgress
 	if err := startGame(player, state.Board); err != nil {
 		return errors.WithMessage(err, "start game")
 	}
-	if player.Cell() == domain.O {
+	u.mu.Unlock()
+
+	switch {
+	case state.RecoveredPlayer == player.Uuid():
+		if err := player.SendMessage(domain.Message{Type: domain.RequestMove}); err != nil {
+			return errors.WithMessage(err, "send message to player")
+		}
+		isGameFinished, err := u.handlePlayersMove(player, state)
+		if err != nil {
+			return errors.WithMessage(err, "handle player's move")
+		}
+		if isGameFinished {
+			return nil
+		}
+	case state.Round == 0 && player.Cell() == domain.O:
 		player.MakeMove(domain.Move{Status: domain.NoneMove})
 	}
+
 	for {
 		select {
 		case v := <-player.GetEnemyMove():
+			fmt.Println("start handle enemy's move")
 			switch v.Status {
 			case domain.NoneMove:
 				if err := player.SendMessage(domain.Message{Type: domain.RequestMove}); err != nil {
@@ -41,6 +63,10 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 					return errors.WithMessage(err, "send message")
 				}
 			case domain.Disconnect:
+				u.mu.Lock()
+				state.Status = domain.Finished
+				u.mu.Unlock()
+
 				err := player.SendMessage(domain.Message{
 					Type:    domain.Walkover,
 					Payload: domain.WalkoverPayload{GameResult: WalkoverGameResult},
@@ -50,6 +76,10 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 				}
 				return nil
 			default:
+				u.mu.Lock()
+				state.Status = domain.Finished
+				u.mu.Unlock()
+
 				gameResult, err := toGameResult(v.Status, player)
 				if err != nil {
 					return errors.WithMessage(err, "to game result")
@@ -60,41 +90,68 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 				}
 				return nil
 			}
-			move, err := receiveMoveMessage(player, state.Board)
-			switch {
-			case errors.Is(err, domain.ErrConnectionClosed):
-				player.MakeMove(domain.Move{Status: domain.Disconnect})
-				return nil
-			case err != nil:
-				return errors.WithMessage(err, "receive move message")
-			}
-			moveStatus, err := executeMove(move, state)
+
+			isGameFinished, err := u.handlePlayersMove(player, state)
 			if err != nil {
-				return errors.WithMessage(err, "execute player's move")
+				return errors.WithMessage(err, "handle player's move")
 			}
-			//printBoard(state.Board)
-			player.MakeMove(domain.Move{
-				CellType: player.Cell(),
-				Position: move.Position,
-				Status:   moveStatus,
-			})
-			gameResult, err := toGameResult(moveStatus, player)
-			switch {
-			case errors.Is(err, errUnexpectedMoveStatus):
-				/* the game isn't over, it's still in progress */
-				if err := sendMoveMessage(player, move.Position); err != nil {
-					return errors.WithMessage(err, "send move message")
-				}
-			case err != nil:
-				return errors.WithMessage(err, "to game result") /* impossible case but.... */
-			default:
-				err := sendMoveMessage(player, move.Position, domain.WithGameResult(gameResult))
-				if err != nil {
-					return errors.WithMessage(err, "send move message")
-				}
+			if isGameFinished {
 				return nil
 			}
 		}
+	}
+}
+
+func (u useCase) handlePlayersMove(player domain.Player, state *domain.GameState) (isGameFinished bool, err error) {
+	move, err := receiveMoveMessage(player, state.Board)
+	switch {
+	case errors.Is(err, domain.ErrConnectionClosed):
+		player.MakeMove(domain.Move{Status: domain.Disconnect})
+		return true, nil
+	case err != nil:
+		return false, errors.WithMessage(err, "receive move message")
+	}
+
+	moveStatus, err := u.executeMove(move, state)
+	if err != nil {
+		return false, errors.WithMessage(err, "execute player's move")
+	}
+	//printBoard(state.Board)
+
+	defer func() {
+		if err != nil {
+			player.MakeMove(domain.Move{Status: domain.Disconnect})
+			return
+		}
+		player.MakeMove(domain.Move{
+			CellType: player.Cell(),
+			Position: move.Position,
+			Status:   moveStatus,
+		})
+	}()
+
+	//player.MakeMove(domain.Move{
+	//	CellType: player.Cell(),
+	//	Position: move.Position,
+	//	Status:   moveStatus,
+	//})
+
+	gameResult, err := toGameResult(moveStatus, player)
+	switch {
+	case errors.Is(err, errUnexpectedMoveStatus):
+		/* the game isn't over, it's still in progress */
+		if err := sendMoveMessage(player, move.Position); err != nil {
+			return false, errors.WithMessage(err, "send move message")
+		}
+		return false, nil
+	case err != nil:
+		return false, errors.WithMessage(err, "to game result") /* impossible case but.... */
+	default:
+		err := sendMoveMessage(player, move.Position, domain.WithGameResult(gameResult))
+		if err != nil {
+			return false, errors.WithMessage(err, "send move message")
+		}
+		return true, nil
 	}
 }
 
@@ -139,10 +196,17 @@ func receiveMoveMessage(player domain.Player, board domain.Board) (domain.Player
 		if msg.Type != domain.PlayerMove {
 			return domain.PlayerMovePayload{}, errors.New("unexpected message type")
 		}
+
 		move, err := utils.UnmarshalJson[domain.PlayerMovePayload](msg.Payload)
 		if err != nil {
 			return domain.PlayerMovePayload{}, errors.WithMessage(err, "unmarshal player's move")
 		}
+		if player.Cell() != move.CellType {
+			return domain.PlayerMovePayload{}, errors.Errorf(
+				"expected cell type '%c', got '%c'", player.Cell(), move.CellType,
+			)
+		}
+
 		err = validateMovePosition(board, move.Position)
 		switch {
 		case errors.Is(err, errInvalidSelectedPosition):
@@ -181,9 +245,12 @@ var winConditions = [8][3]uint8{
 	{2, 4, 6},
 }
 
-func executeMove(move domain.PlayerMovePayload, state *domain.GameState) (domain.MoveStatus, error) {
+func (u useCase) executeMove(move domain.PlayerMovePayload, state *domain.GameState) (domain.MoveStatus, error) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
 	state.Board[move.Position] = move.CellType
 	state.Round++
+	state.CurrentMove = invertCellType(move.CellType)
 	if isWinnable(state.Board, move.CellType) {
 		switch move.CellType {
 		case domain.X:
@@ -204,6 +271,17 @@ func executeMove(move domain.PlayerMovePayload, state *domain.GameState) (domain
 		return domain.MoveO, nil
 	default:
 		return domain.NoneMove, errors.New("unexpected cell type")
+	}
+}
+
+func invertCellType(cellType domain.Cell) domain.Cell {
+	switch cellType {
+	case domain.X:
+		return domain.O
+	case domain.O:
+		return domain.X
+	default:
+		return cellType
 	}
 }
 

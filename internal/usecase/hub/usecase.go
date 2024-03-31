@@ -31,8 +31,8 @@ type useCase struct {
 	logger      *zap.Logger
 }
 
-func New(game domain.GameUseCase, logger *zap.Logger) useCase {
-	u := useCase{
+func New(game domain.GameUseCase, logger *zap.Logger) *useCase {
+	u := &useCase{
 		game:        game,
 		clientQueue: make(chan enqueuedClient, clientQueueBufSize),
 		gamesStates: make(map[string]*domain.GameState),
@@ -46,8 +46,11 @@ func New(game domain.GameUseCase, logger *zap.Logger) useCase {
 	return u
 }
 
-func (u useCase) Handle(ctx context.Context, client domain.Client) error {
-	player := u.enqueueForGame(client)
+func (u *useCase) Handle(ctx context.Context, client domain.Client) error {
+	player, ok := u.continueActiveGame(client)
+	if !ok {
+		player = u.enqueueForGame(client)
+	}
 	u.mu.RLock()
 	gameState := u.gamesStates[player.GameUuid()]
 	u.mu.RUnlock()
@@ -57,7 +60,7 @@ func (u useCase) Handle(ctx context.Context, client domain.Client) error {
 	return nil
 }
 
-func (u useCase) enqueueForGame(client domain.Client) domain.Player {
+func (u *useCase) enqueueForGame(client domain.Client) domain.Player {
 	ch := make(chan domain.Player)
 	defer close(ch)
 	u.clientQueue <- enqueuedClient{
@@ -67,7 +70,7 @@ func (u useCase) enqueueForGame(client domain.Client) domain.Player {
 	return <-ch
 }
 
-func (u useCase) createGames() {
+func (u *useCase) createGames() {
 	for {
 		for len(u.clientQueue) > 1 {
 			lhs := <-u.clientQueue
@@ -80,7 +83,7 @@ func (u useCase) createGames() {
 	}
 }
 
-func (u useCase) createGame(playerX string, playerO string) string {
+func (u *useCase) createGame(playerX string, playerO string) string {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	gameUuid := uuid.NewString()
@@ -98,19 +101,21 @@ func (u useCase) createGame(playerX string, playerO string) string {
 	return gameUuid
 }
 
-func (u useCase) syncStates() {
+func (u *useCase) syncStates() {
 	defer u.ticker.Stop()
 	for range u.ticker.C {
-		u.removeFinishedGames()
-		u.statesChan <- u.gamesStates
+		currentGameCount := u.removeFinishedGames()
+		if currentGameCount > 0 {
+			u.statesChan <- u.gamesStates
+		}
 	}
 }
 
-func (u useCase) GamesStates() <-chan map[string]*domain.GameState {
+func (u *useCase) GamesStates() <-chan map[string]*domain.GameState {
 	return u.statesChan
 }
 
-func (u useCase) removeFinishedGames() {
+func (u *useCase) removeFinishedGames() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	for gameUuid, state := range u.gamesStates {
@@ -118,11 +123,45 @@ func (u useCase) removeFinishedGames() {
 			delete(u.gamesStates, gameUuid)
 		}
 	}
+	return len(u.gamesStates)
 }
 
-func (u useCase) ApplyStates(_ context.Context, states map[string]*domain.GameState) {
+func (u *useCase) ApplyStates(_ context.Context, states map[string]*domain.GameState) {
 	u.mu.Lock()
 	u.gamesStates = states
 	u.logger.Info("applied states", zap.Any("states", u.gamesStates))
 	u.mu.Unlock()
+}
+
+func (u *useCase) continueActiveGame(client domain.Client) (domain.Player, bool) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.logger.Info("trying to find active game with this client...", zap.Any("states", u.gamesStates))
+	clientUuid := client.Uuid()
+	for gameUuid, state := range u.gamesStates {
+		if state.Status == domain.Finished {
+			continue
+		}
+		cellType := domain.None
+		switch clientUuid {
+		case state.PlayerX:
+			cellType = domain.X
+		case state.PlayerO:
+			cellType = domain.O
+		}
+		if cellType == domain.None {
+			continue
+		}
+		if state.MoveChan == nil {
+			state.MoveChan = make(chan domain.Move)
+		}
+
+		if state.RecoveredPlayer == "" && cellType == state.CurrentMove {
+			state.RecoveredPlayer = clientUuid
+		}
+
+		u.logger.Info("found active game", zap.String("game uuid", gameUuid))
+		return domain.NewPlayer(gameUuid, client, cellType, state.MoveChan), true
+	}
+	return domain.Player{}, false
 }
