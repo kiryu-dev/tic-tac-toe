@@ -33,7 +33,7 @@ type SyncUseCase interface {
 	Sync(ctx context.Context, statesChan <-chan map[string]*GameState)
 	DefineMasterServer(ctx context.Context)
 	CheckMasterHealth(ctx context.Context) error
-	Chan() <-chan ServerInfo
+	ServerInfoChan() <-chan ServerInfo
 }
 
 type SyncRepository interface {

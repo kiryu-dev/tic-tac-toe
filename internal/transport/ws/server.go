@@ -50,7 +50,7 @@ func (s *server) ListenAndServe(ctx context.Context) {
 	go s.sync.DefineMasterServer(ctx)
 	for {
 		select {
-		case info := <-s.sync.Chan():
+		case info := <-s.sync.ServerInfoChan():
 			s.logger.Info("server info", zap.Any("info", info))
 			s.masterHost = info.MasterServerName
 			s.role = info.ServerRole

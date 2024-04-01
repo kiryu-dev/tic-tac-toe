@@ -66,7 +66,7 @@ func сonnectToServer(port string, ticker *time.Ticker) error {
 		if err != nil {
 			return errors.WithMessage(err, "handle actions")
 		}
-		if !result.shouldSwitchToNewMaster {
+		if !result.shouldSwitchToNewMaster { // буквально означает, что игра закончена
 			return nil
 		}
 		var ok bool

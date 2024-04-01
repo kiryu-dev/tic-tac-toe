@@ -128,6 +128,6 @@ func (u *useCase) compareMasters(lhs string, rhs string) string {
 	return lhs
 }
 
-func (u *useCase) Chan() <-chan domain.ServerInfo {
+func (u *useCase) ServerInfoChan() <-chan domain.ServerInfo {
 	return u.srvChan
 }
