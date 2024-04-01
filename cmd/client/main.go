@@ -19,7 +19,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-const connectTryPeriod = 5 * time.Second
+const connectTryPeriod = 3 * time.Second
 
 var (
 	clientUuid = uuid.NewString()

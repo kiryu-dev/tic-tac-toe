@@ -4,11 +4,16 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/kiryu-dev/tic-tac-toe/internal/domain"
 	"github.com/kiryu-dev/tic-tac-toe/pkg/utils"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
+)
+
+const (
+	maxReconnectionTime = 20 * time.Second
 )
 
 type useCase struct {
@@ -27,10 +32,13 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 	u.mu.Lock()
 	u.logger.Info("start playing", zap.String("player uuid", player.Uuid()))
 	state.Status = domain.InProgress
+	state.ActivePlayerCount++
 	if err := startGame(player, state.Board); err != nil {
 		return errors.WithMessage(err, "start game")
 	}
 	u.mu.Unlock()
+
+	go u.handleEnemyReconnect(player, state)
 
 	switch {
 	case state.RecoveredPlayer == player.Uuid():
@@ -51,7 +59,6 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 	for {
 		select {
 		case v := <-player.GetEnemyMove():
-			fmt.Println("start handle enemy's move")
 			switch v.Status {
 			case domain.NoneMove:
 				if err := player.SendMessage(domain.Message{Type: domain.RequestMove}); err != nil {
@@ -63,16 +70,8 @@ func (u useCase) Play(_ context.Context, player domain.Player, state *domain.Gam
 					return errors.WithMessage(err, "send message")
 				}
 			case domain.Disconnect:
-				u.mu.Lock()
-				state.Status = domain.Finished
-				u.mu.Unlock()
-
-				err := player.SendMessage(domain.Message{
-					Type:    domain.Walkover,
-					Payload: domain.WalkoverPayload{GameResult: WalkoverGameResult},
-				})
-				if err != nil {
-					return errors.WithMessage(err, "send message to player")
+				if err := u.handleEnemyDisconnect(player, state); err != nil {
+					return errors.WithMessage(err, "handle enemy disconnect")
 				}
 				return nil
 			default:
@@ -153,6 +152,21 @@ func (u useCase) handlePlayersMove(player domain.Player, state *domain.GameState
 		}
 		return true, nil
 	}
+}
+
+func (u useCase) handleEnemyDisconnect(player domain.Player, state *domain.GameState) error {
+	u.mu.Lock()
+	state.Status = domain.Finished
+	u.mu.Unlock()
+
+	err := player.SendMessage(domain.Message{
+		Type:    domain.Walkover,
+		Payload: domain.WalkoverPayload{GameResult: WalkoverGameResult},
+	})
+	if err != nil {
+		return errors.WithMessage(err, "send message to player")
+	}
+	return nil
 }
 
 func startGame(player domain.Player, board domain.Board) error {
@@ -325,6 +339,17 @@ func toGameResult(status domain.MoveStatus, player domain.Player) (string, error
 		return WalkoverGameResult, nil
 	default:
 		return "", errUnexpectedMoveStatus
+	}
+}
+
+func (u useCase) handleEnemyReconnect(player domain.Player, state *domain.GameState) {
+	select {
+	case <-time.After(maxReconnectionTime):
+		if state.ActivePlayerCount != 2 {
+			if err := u.handleEnemyDisconnect(player, state); err != nil {
+				u.logger.Warn(err.Error())
+			}
+		}
 	}
 }
 

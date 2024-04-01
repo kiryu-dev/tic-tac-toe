@@ -6,7 +6,6 @@ import (
 
 var (
 	ErrConnectionClosed = errors.New("connection closed")
-	ErrEmptyMessage     = errors.New("empty message")
 )
 
 const (

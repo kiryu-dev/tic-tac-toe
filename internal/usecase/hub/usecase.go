@@ -148,10 +148,12 @@ func (u *useCase) continueActiveGame(client domain.Client) (domain.Player, bool)
 			cellType = domain.X
 		case state.PlayerO:
 			cellType = domain.O
-		}
-		if cellType == domain.None {
+		default:
 			continue
 		}
+		//if cellType == domain.None {
+		//	continue
+		//}
 		if state.MoveChan == nil {
 			state.MoveChan = make(chan domain.Move)
 		}
