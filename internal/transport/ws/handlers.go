@@ -46,8 +46,7 @@ func (s *server) serveWs(w http.ResponseWriter, r *http.Request) {
 func (s *server) healthCheck(w http.ResponseWriter, _ *http.Request) {
 	s.logger.Info("health checking...")
 	resp := domain.HealthCheckResponse{
-		MasterServer: s.masterHost,
-		Role:         s.role,
+		Role: s.role,
 	}
 	if err := jsoniter.NewEncoder(w).Encode(resp); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)

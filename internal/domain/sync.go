@@ -26,8 +26,7 @@ type DefineMasterResponse struct {
 }
 
 type HealthCheckResponse struct {
-	MasterServer string
-	Role         ServerRole
+	Role ServerRole
 }
 
 type SyncUseCase interface {
